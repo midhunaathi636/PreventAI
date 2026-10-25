@@ -1,0 +1,29 @@
+version: 1
+backend:
+  phases:
+    build:
+      commands:
+        - npm install --cache .npm --prefer-offline --no-audit --no-fund
+        # Vendors the agent service's Python dependencies into
+        # backend/.lambda-bundle/, which CDK uploads as the Lambda code asset.
+        # Must run before pipeline-deploy, which is when CDK synthesises.
+        - npm run build:agents
+        - npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
+frontend:
+  phases:
+    build:
+      commands:
+        - npm install --cache .npm --prefer-offline --no-audit --no-fund
+        - |
+          if [ ! -f amplify_outputs.json ]; then
+            npx ampx generate outputs --branch "$AWS_BRANCH" --app-id "$AWS_APP_ID" || true
+          fi
+        - npm run build
+  artifacts:
+    baseDirectory: dist
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - .npm/**/*
+      - node_modules/**/*

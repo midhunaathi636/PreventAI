@@ -1,0 +1,9 @@
+# Dependencies vendored into the Lambda bundle.
+# Deliberately excludes uvicorn: Lambda invokes the ASGI app through Mangum,
+# so an HTTP server would be dead weight in the package.
+fastapi==0.115.6
+mangum==0.19.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+httpx==0.28.1
+python-jose[cryptography]==3.3.0

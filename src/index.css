@@ -1,0 +1,240 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================================================== *
+ * PreventAI design tokens
+ *
+ * Light clinical: the register of a modern hospital dashboard. An off-white
+ * ground, soft rounded panels separated by tone rather than heavy borders,
+ * one green accent, and generous space.
+ *
+ * Two colour systems that must never be confused:
+ *   --accent*   green. System voice: the product, controls, focus, actions.
+ *   --risk-*    green → amber → orange → red. Clinical voice: severity.
+ * The accent green and the low-risk green are deliberately different hues so
+ * a button can never be misread as a risk level.
+ *
+ * Every surface is a token. Tailwind reads these rather than redefining them,
+ * so a colour is decided in exactly one place and all screens inherit it.
+ * ========================================================================== */
+
+:root {
+  /* Ground — warm off-white, never pure #fff, so white cards can lift off it */
+  --bg: #f4f7f6;
+  --bg-deep: #e8eeec;
+  --surface: #ffffff;
+  --surface-2: #f7faf9;
+  --surface-3: #eef3f1;
+  --hairline: #dde6e3;
+
+  /* Ink */
+  --ink: #0f2420;
+  --ink-dim: #577068;
+  --ink-faint: #8aa39b;
+
+  /* System accent — clinical green */
+  --accent: #10876a;
+  --accent-bright: #0c6f57;
+  --accent-deep: #0a5944;
+  --accent-soft: #e3f2ed;
+  --accent-ink: #ffffff;
+
+  /* Clinical severity ramp — never used for UI chrome */
+  --risk-low: #2fa36b;
+  --risk-moderate: #d9a521;
+  --risk-high: #e07a3f;
+  --risk-very-high: #d6475a;
+
+  /* Agent identity, shared by the 3D scene and the trace */
+  --agent-risk: #10876a;
+  --agent-plan: #3b7ddd;
+  --agent-personalize: #7a5cd6;
+  --agent-safety: #e07a3f;
+
+  /* Type */
+  --font-display: 'Big Shoulders', 'Arial Narrow', system-ui, sans-serif;
+  --font-text: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+
+  /* Five steps. Nothing uses a sixth. */
+  --step-small: clamp(0.8125rem, 0.79rem + 0.1vw, 0.875rem);
+  --step-body: clamp(1rem, 0.96rem + 0.2vw, 1.0625rem);
+  --step-lead: clamp(1.125rem, 1.05rem + 0.5vw, 1.4375rem);
+  --step-sub: clamp(1.75rem, 1.2rem + 2.2vw, 3rem);
+  --step-head: clamp(3rem, 1rem + 8vw, 8.5rem);
+
+  /* Frame */
+  --gutter: clamp(1rem, 4vw, 4.5rem);
+  --section-gap: clamp(4.5rem, 10vw, 13rem);
+
+  /* Soft, rounded panels in the hospital-dashboard register */
+  --radius: 14px;
+  --radius-sm: 10px;
+
+  /* Light themes need real elevation; tone alone is not enough on white */
+  --lift: 0 1px 2px rgba(15, 36, 32, 0.04), 0 4px 16px rgba(15, 36, 32, 0.05);
+  --lift-hover: 0 2px 4px rgba(15, 36, 32, 0.05), 0 10px 28px rgba(15, 36, 32, 0.08);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  color-scheme: light;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-text);
+    font-size: var(--step-body);
+    line-height: 1.55;
+    overflow-x: hidden;
+  }
+
+  h1,
+  h2,
+  h3,
+  .display {
+    font-family: var(--font-display);
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: -0.005em;
+    line-height: 0.9;
+    color: var(--ink);
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Form controls.
+   *
+   * Several screens render raw <input>/<select>/<textarea> rather than the
+   * primitives in ui.tsx. Setting the ground here once means none of them
+   * depends on the browser default.
+   */
+  input,
+  select,
+  textarea {
+    background-color: var(--surface);
+    color: var(--ink);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--ink-faint);
+  }
+
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--ink);
+    -webkit-box-shadow: 0 0 0 1000px var(--surface) inset;
+    caret-color: var(--ink);
+  }
+
+  input[type='range'] {
+    background-color: transparent;
+    accent-color: var(--accent);
+  }
+
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--accent);
+  }
+}
+
+@layer utilities {
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .page-gutter {
+    padding-inline: var(--gutter);
+  }
+
+  /* Panels lift with shadow rather than being outlined. */
+  .lift {
+    box-shadow: var(--lift);
+  }
+  .lift-hover {
+    transition: box-shadow 0.25s var(--ease-out), transform 0.25s var(--ease-out);
+  }
+  .lift-hover:hover {
+    box-shadow: var(--lift-hover);
+    transform: translateY(-2px);
+  }
+
+  .rise {
+    opacity: 0;
+    transform: translateY(20px);
+    animation: rise 0.7s var(--ease-out) forwards;
+  }
+
+  @keyframes rise {
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rise {
+      animation: none;
+      opacity: 1;
+      transform: none;
+    }
+    .lift-hover:hover {
+      transform: none;
+    }
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-deep);
+}
+::-webkit-scrollbar-thumb {
+  background: #c6d6d1;
+  border: 3px solid var(--bg-deep);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
