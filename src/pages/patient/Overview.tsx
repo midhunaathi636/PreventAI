@@ -86,7 +86,13 @@ export function PatientOverview() {
 
   const latestRisk = riskScores[riskScores.length - 1];
   const previousRisk = riskScores[riskScores.length - 2];
-  const riskTrend = latestRisk && previousRisk ? latestRisk.overall_risk - previousRisk.overall_risk : 0;
+  // Rounded to one decimal. Both scores arrive with one decimal place, but
+  // subtracting two of them in binary floating point produces values like
+  // 20.799999999999997, which rendered raw and overflowed the card.
+  const riskTrend =
+    latestRisk && previousRisk
+      ? Math.round((latestRisk.overall_risk - previousRisk.overall_risk) * 10) / 10
+      : 0;
 
   const chartData = riskScores.map((r) => ({
     label: formatDate(r.recorded_at).split(' ').slice(0, 2).join(' '),

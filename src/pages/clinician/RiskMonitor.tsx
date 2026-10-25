@@ -104,7 +104,11 @@ export function ClinicianRiskMonitor() {
           {risingRisk.length > 0 ? (
             <div className="space-y-3">
               {risingRisk.map((p) => {
-                const delta = p.latest_risk!.overall_risk - p.prev_risk!.overall_risk;
+                // Rounded for the same reason as the patient overview:
+                // subtracting two one-decimal scores yields binary floating
+                // point noise, and the badge renders it raw.
+                const delta =
+                  Math.round((p.latest_risk!.overall_risk - p.prev_risk!.overall_risk) * 10) / 10;
                 return (
                   <Link key={p.id} to={`/clinician/patient/${p.id}`}>
                     <div className="flex items-center gap-4 p-4 rounded border border-risk-moderate/30 bg-risk-moderate/10/50 hover:bg-risk-moderate/10 transition-colors">
