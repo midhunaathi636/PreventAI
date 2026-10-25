@@ -1038,43 +1038,95 @@ class AmplifyApiClient {
     };
   }
 
+  /**
+   * Plans for the review queue, plus the ones already decided.
+   *
+   * `plans` is what still needs a decision; `decided` is what a clinician has
+   * approved or rejected, newest first. They are returned together because
+   * the review screen shows both, and the query used to fetch only pending
+   * ones — which is why "Recent Decisions" was permanently empty.
+   *
+   * A decision is identified by `approved_by` being set, not by status.
+   * Status alone cannot tell them apart: `overridden` means both "a clinician
+   * rejected this" and "a newer assessment superseded it", and only the
+   * former has someone's id stamped on it.
+   */
   async getClinicianPendingPlans() {
     const { data } = await client.models.PreventionPlan.list({
       filter: {
-        or: [{ status: { eq: 'pending_review' } }, { status: { eq: 'draft' } }],
+        or: [
+          { status: { eq: 'pending_review' } },
+          { status: { eq: 'draft' } },
+          { status: { eq: 'active' } },
+          { status: { eq: 'overridden' } },
+          { status: { eq: 'completed' } },
+        ],
       },
     });
-    const plans = [];
-    for (const plan of data ?? []) {
-      let patientName = plan.patientId;
-      let patientEmail = '';
+
+    // One lookup per patient rather than per plan: a patient with several
+    // plans was costing a profile fetch for each of them.
+    const profileCache = new Map<string, { name: string; email: string }>();
+    const lookup = async (patientId: string) => {
+      const cached = profileCache.get(patientId);
+      if (cached) return cached;
+      let entry = { name: patientId, email: '' };
       try {
-        const { data: profile } = await client.models.Profile.get({ id: plan.patientId });
+        const { data: profile } = await client.models.Profile.get({ id: patientId });
         if (profile) {
-          patientName = `${profile.firstName} ${profile.lastName}`;
-          patientEmail = profile.email;
+          entry = { name: `${profile.firstName} ${profile.lastName}`, email: profile.email };
         }
       } catch {
-        /* ignore */
+        /* a missing profile should not drop the plan from the queue */
       }
-      plans.push({
-        ...mapPlan(plan),
-        patient_name: patientName,
-        patient_email: patientEmail,
-      });
+      profileCache.set(patientId, entry);
+      return entry;
+    };
+
+    const all = [];
+    for (const row of data ?? []) {
+      const mapped = mapPlan(row);
+      if (!mapped) continue;
+      const patient = await lookup(row.patientId);
+      all.push({ ...mapped, patient_name: patient.name, patient_email: patient.email });
     }
-    return { plans };
+
+    const plans = all.filter(
+      (p) => p.status === 'pending_review' || p.status === 'draft'
+    );
+
+    const decided = all
+      .filter((p) => Boolean(p.approved_by))
+      .sort(
+        (a, b) =>
+          new Date(b.approved_at ?? 0).getTime() - new Date(a.approved_at ?? 0).getTime()
+      );
+
+    return { plans, decided };
   }
 
+  /**
+   * Record a clinician's decision on a plan.
+   *
+   * Who decided and when are stamped for a rejection as well as an approval.
+   * Previously a rejection cleared both, which left no record of who made the
+   * call and made a rejected plan indistinguishable from one the system
+   * superseded automatically.
+   */
   async approvePlan(planId: string, approved: boolean, comments?: string) {
     const sub = await currentSub();
-    const { data } = await client.models.PreventionPlan.update({
+    if (!sub) throw new Error('Not authenticated');
+
+    const { data, errors } = await client.models.PreventionPlan.update({
       id: planId,
       status: approved ? 'active' : 'overridden',
-      approvedBy: approved ? sub ?? undefined : undefined,
-      approvedAt: approved ? new Date().toISOString() : undefined,
+      approvedBy: sub,
+      approvedAt: new Date().toISOString(),
       reviewComments: comments ?? '',
     });
+    if (errors?.length) {
+      throw new Error(errors.map((e: { message: string }) => e.message).join('; '));
+    }
     return { success: true, plan: mapPlan(data) };
   }
 

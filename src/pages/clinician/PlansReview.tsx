@@ -18,17 +18,38 @@ export function ClinicianPlansReview() {
     if (!profile) return;
     try {
       const data = await apiClient.getClinicianPendingPlans();
-      const plans = (data.plans || []) as (PreventionPlan & { actions?: PlanAction[]; patient?: Profile; patient_name?: string; patient_email?: string })[];
-      // Map API patient_name into a minimal patient object for the UI
-      const withPatient = plans.map((p) => ({
-        ...p,
-        patient: p.patient || (p.patient_name
-          ? { id: p.patient_id, first_name: p.patient_name.split(' ')[0] || '', last_name: p.patient_name.split(' ').slice(1).join(' ') || '', email: p.patient_email || '' } as Profile
-          : undefined),
-      }));
-      setPendingPlans(withPatient.filter((p) => p.status === 'pending_review' || p.status === 'draft'));
-      setFlaggedPlans(withPatient.filter((p) => p.safety_verified === false && p.status === 'pending_review'));
-      setRecentDecisions(withPatient.filter((p) => p.status === 'active' || p.status === 'overridden'));
+
+      type ApiPlan = PreventionPlan & {
+        actions?: PlanAction[];
+        patient?: Profile;
+        patient_name?: string;
+        patient_email?: string;
+      };
+
+      // The API returns `patient_name` as one string; the UI wants a profile.
+      const withPatient = (list: ApiPlan[]) =>
+        list.map((p) => ({
+          ...p,
+          patient:
+            p.patient ||
+            (p.patient_name
+              ? ({
+                  id: p.patient_id,
+                  first_name: p.patient_name.split(' ')[0] || '',
+                  last_name: p.patient_name.split(' ').slice(1).join(' ') || '',
+                  email: p.patient_email || '',
+                } as Profile)
+              : undefined),
+        }));
+
+      const pending = withPatient((data.plans || []) as ApiPlan[]);
+      // Decisions come from their own list. Filtering the pending list for
+      // decided statuses could never match, which is why this was empty.
+      const decided = withPatient((data.decided || []) as ApiPlan[]);
+
+      setPendingPlans(pending);
+      setFlaggedPlans(pending.filter((p) => p.safety_verified === false));
+      setRecentDecisions(decided);
     } catch (error) {
       console.error('Failed to load plans review:', error);
     } finally {
@@ -68,8 +89,8 @@ export function ClinicianPlansReview() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Pending Review" value={pendingPlans.length} icon={<ClipboardCheck size={20} />} color="amber" />
         <StatCard label="Safety Flags" value={flaggedPlans.length} icon={<Shield size={20} />} color="red" />
-        <StatCard label="Recent Decisions" value={recentDecisions.length} icon={<Check size={20} />} color="teal" />
-        <StatCard label="Total Reviewed" value={recentDecisions.filter((p) => p.status === 'active').length} icon={<Check size={20} />} color="emerald" />
+        <StatCard label="Approved" value={recentDecisions.filter((p) => p.status === 'active').length} icon={<Check size={20} />} color="emerald" />
+        <StatCard label="Total Reviewed" value={recentDecisions.length} icon={<Check size={20} />} color="teal" />
       </div>
 
       {/* Pending plans */}
@@ -174,17 +195,39 @@ export function ClinicianPlansReview() {
         <CardBody>
           {recentDecisions.length > 0 ? (
             <div className="space-y-2">
-              {recentDecisions.map((plan) => {
+              {recentDecisions.slice(0, 10).map((plan) => {
                 const sc = planStatusColor(plan.status);
+                const approved = plan.status === 'active';
                 return (
                   <Link key={plan.id} to={`/clinician/patient/${plan.patient_id}`}>
                     <div className="flex items-center gap-3 p-3 rounded hover:bg-surface-2 transition-colors">
-                      {plan.patient && <Avatar initials={getInitials(plan.patient.first_name, plan.patient.last_name)} size="sm" />}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-ink">{plan.patient?.first_name} {plan.patient?.last_name}</div>
-                        <div className="text-xs text-ink-dim">Plan v{plan.plan_version} · {formatDate(plan.updated_at)}</div>
+                      {plan.patient && (
+                        <Avatar
+                          initials={getInitials(plan.patient.first_name, plan.patient.last_name)}
+                          size="sm"
+                        />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-ink">
+                          {plan.patient?.first_name} {plan.patient?.last_name}
+                        </div>
+                        {/* No action count here: `actions` is a lazy relation
+                            that a list query does not hydrate, so it would
+                            always read "0 actions". */}
+                        <div className="text-xs text-ink-dim">
+                          {approved ? 'Approved' : 'Overridden'}{' '}
+                          {formatDate(plan.approved_at || plan.updated_at)} · Plan v
+                          {plan.plan_version}
+                        </div>
+                        {plan.review_comments && (
+                          <div className="mt-1 truncate text-xs italic text-ink-faint">
+                            “{plan.review_comments}”
+                          </div>
+                        )}
                       </div>
-                      <Badge className={`${sc.bg} ${sc.text} ${sc.border}`}>{planStatusLabel(plan.status)}</Badge>
+                      <Badge className={`${sc.bg} ${sc.text} ${sc.border}`}>
+                        {planStatusLabel(plan.status)}
+                      </Badge>
                     </div>
                   </Link>
                 );
