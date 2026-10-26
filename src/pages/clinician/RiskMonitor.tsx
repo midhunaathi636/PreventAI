@@ -12,22 +12,42 @@ export function ClinicianRiskMonitor() {
   const [loading, setLoading] = useState(true);
   const [highRiskPatients, setHighRiskPatients] = useState<(Profile & { latest_risk?: RiskScore; prev_risk?: RiskScore })[]>([]);
   const [risingRisk, setRisingRisk] = useState<(Profile & { latest_risk?: RiskScore; prev_risk?: RiskScore })[]>([]);
-  const [activityLog, setActivityLog] = useState<(AgentActivity & { patient?: Profile })[]>([]);
+  const [activityLog, setActivityLog] = useState<(AgentActivity & { patient_name?: string })[]>([]);
 
   const load = useCallback(async () => {
     if (!profile) return;
     try {
       const data = await apiClient.getClinicianRiskMonitor();
-      const patients = (data.patients || []) as { id: string; name: string; email: string; score: number; level: string; factors: string[] }[];
+      type ApiPatient = {
+        id: string; name: string; email: string;
+        score: number; level: string; factors: string[];
+        recorded_at: string | null;
+        prev_score: number | null; prev_level: string | null; prev_recorded_at: string | null;
+        assessment_count: number;
+      };
+      const patients = (data.patients || []) as ApiPatient[];
+
       const mapped = patients.map((p) => {
         const [first = '', ...rest] = (p.name || '').split(' ');
         const latest_risk = {
+          id: p.id,
+          patient_id: p.id,
           overall_risk: p.score,
           risk_level: p.level as RiskScore['risk_level'],
-          recorded_at: new Date().toISOString(),
+          // The real timestamp, not "now" — the previous code stamped every
+          // row with the current time, so "2 minutes ago" was always a lie.
+          recorded_at: p.recorded_at ?? new Date().toISOString(),
+          contributing_factors: p.factors ?? [],
+        } as unknown as RiskScore;
+
+        const prev_risk = p.prev_score === null ? undefined : ({
+          id: `${p.id}-prev`,
           patient_id: p.id,
-          id: p.id,
-        } as RiskScore;
+          overall_risk: p.prev_score,
+          risk_level: (p.prev_level ?? 'low') as RiskScore['risk_level'],
+          recorded_at: p.prev_recorded_at ?? '',
+        } as unknown as RiskScore);
+
         return {
           id: p.id,
           email: p.email,
@@ -35,11 +55,27 @@ export function ClinicianRiskMonitor() {
           last_name: rest.join(' '),
           role: 'patient' as const,
           latest_risk,
-        } as Profile & { latest_risk?: RiskScore };
+          prev_risk,
+        } as Profile & { latest_risk?: RiskScore; prev_risk?: RiskScore };
       });
-      setHighRiskPatients(mapped.filter((p) => p.latest_risk && (p.latest_risk.risk_level === 'high' || p.latest_risk.risk_level === 'very_high')));
-      setRisingRisk(mapped.filter((p) => p.latest_risk && p.latest_risk.overall_risk >= 40 && p.latest_risk.overall_risk < 70));
-      setActivityLog([]);
+
+      setHighRiskPatients(
+        mapped.filter(
+          (p) => p.latest_risk &&
+            (p.latest_risk.risk_level === 'high' || p.latest_risk.risk_level === 'very_high')
+        )
+      );
+
+      // Rising means the score actually went up against a previous
+      // assessment. The old filter just picked the 40–69 band, which is
+      // "moderate risk", not "rising" — and it then read `prev_risk`, which
+      // nothing ever set.
+      setRisingRisk(
+        mapped.filter((p) => p.prev_risk && p.latest_risk &&
+          p.latest_risk.overall_risk > p.prev_risk.overall_risk)
+      );
+
+      setActivityLog((data.activity || []) as (AgentActivity & { patient_name?: string })[]);
     } catch (error) {
       console.error('Failed to load risk monitor data:', error);
     } finally {
@@ -62,7 +98,17 @@ export function ClinicianRiskMonitor() {
         <StatCard label="High Risk Patients" value={highRiskPatients.length} icon={<AlertTriangle size={20} />} color="red" />
         <StatCard label="Rising Risk" value={risingRisk.length} icon={<TrendingUp size={20} />} color="amber" />
         <StatCard label="Agent Activities" value={activityLog.length} icon={<Activity size={20} />} color="blue" />
-        <StatCard label="Safety Flags" value={activityLog.filter((a) => a.agent_type === 'safety').length} icon={<Shield size={20} />} color="violet" />
+        {/* A safety flag is a safety-agent run that did not clear, not every
+            safety-agent run — the old count flagged healthy assessments. */}
+        <StatCard
+          label="Safety Flags"
+          value={activityLog.filter(
+            (a) => a.agent_type === 'safety' &&
+              ['needs_review', 'failed'].includes(String((a as { status?: string }).status))
+          ).length}
+          icon={<Shield size={20} />}
+          color="violet"
+        />
       </div>
 
       {/* High risk patients */}
@@ -80,6 +126,15 @@ export function ClinicianRiskMonitor() {
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-ink">{p.first_name} {p.last_name}</div>
                         <div className="text-sm text-ink-dim">Score: {p.latest_risk!.overall_risk}/100 · {timeAgo(p.latest_risk!.recorded_at)}</div>
+                        {(p.latest_risk!.contributing_factors ?? []).length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {(p.latest_risk!.contributing_factors ?? []).slice(0, 4).map((f) => (
+                              <span key={f} className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-ink-dim">
+                                {f}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <Badge className={`${colors.bg} ${colors.text} ${colors.border}`}>
                         <span className={`h-1.5 w-1.5 rounded-full ${colors.dot}`} />
@@ -127,7 +182,11 @@ export function ClinicianRiskMonitor() {
               })}
             </div>
           ) : (
-            <EmptyState icon={<TrendingUp size={28} />} title="No rising risk" message="No patients showing significant risk increases" />
+            <EmptyState
+              icon={<TrendingUp size={28} />}
+              title="No rising risk"
+              message="A trend needs two assessments for the same patient. Run another assessment to compare against the last one."
+            />
           )}
         </CardBody>
       </Card>
@@ -144,16 +203,20 @@ export function ClinicianRiskMonitor() {
                     {agentTypeLabel(act.agent_type)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-ink">{act.action}</div>
+                    <div className="text-sm font-medium text-ink">{act.action || 'Agent run'}</div>
                     <div className="text-xs text-ink-faint">
-                      {act.patient ? `${act.patient.first_name} ${act.patient.last_name}` : 'Unknown'} · {timeAgo(act.created_at)}
+                      {act.patient_name || 'Unknown patient'} · {timeAgo(act.created_at)}
                     </div>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <EmptyState icon={<Activity size={28} />} title="No agent activity" message="AI agents haven't run for your patients yet" />
+            <EmptyState
+              icon={<Activity size={28} />}
+              title="No agent activity"
+              message="Open a patient and run an AI assessment — each run records one entry per agent here."
+            />
           )}
         </CardBody>
       </Card>

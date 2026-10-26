@@ -890,14 +890,19 @@ class AmplifyApiClient {
     const { data } = await client.models.AgentActivity.list({
       filter: { patientId: { eq: sub } },
     });
-    return (data ?? []).map((a) => ({
-      id: a.id,
-      patient_id: a.patientId,
-      agent_type: a.agentType,
-      status: a.status,
-      message: a.message,
-      created_at: a.createdAt,
-    }));
+    return (data ?? [])
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      .map((a) => ({
+        id: a.id,
+        patient_id: a.patientId,
+        agent_type: a.agentType,
+        status: a.status ?? '',
+        // `action` is what the UI renders; the model stores status + message.
+        action: a.message ?? a.status ?? '',
+        message: a.message ?? '',
+        details: {},
+        created_at: a.createdAt,
+      }));
   }
 
   async submitFeedback(payload: {
@@ -937,12 +942,18 @@ class AmplifyApiClient {
         String(b.recordedAt || '').localeCompare(String(a.recordedAt || ''))
       );
       const latest = sorted[0];
+      // The one before it, so the UI can show a direction of travel rather
+      // than a bare score. Absent on a patient's first assessment.
+      const previous = sorted[1];
       const riskMapped = latest ? mapRisk(latest) : null;
+      const prevMapped = previous ? mapRisk(previous) : null;
       patients.push({
         ...mapped,
         riskScore: latest?.overallRisk ?? riskMapped?.overall_risk ?? 0,
         riskLevel: (latest?.riskLevel as any) ?? riskMapped?.risk_level ?? 'low',
         latest_risk: riskMapped ?? undefined,
+        prev_risk: prevMapped ?? undefined,
+        assessment_count: sorted.length,
         assigned_to_me: !!(mapped.clinician_id && sub && mapped.clinician_id === sub),
       });
     }
@@ -1022,20 +1033,87 @@ class AmplifyApiClient {
     };
   }
 
+  /**
+   * Everything the Risk Monitor screen shows.
+   *
+   * It used to return only id/name/score/level with `factors: []`, which is
+   * why the screen rendered zeros and empty panels: the previous score it
+   * needed for a trend was never fetched, and the agent activity log was
+   * never queried at all even though every assessment writes one row per
+   * agent.
+   */
   async getClinicianRiskMonitor() {
     const { patients } = await this.getClinicianPatients();
+    const activity = await this.getClinicianAgentActivity();
+
     return {
       patients: patients
         .map((p: any) => ({
           id: p.id,
-          name: `${p.first_name} ${p.last_name}`,
+          name: `${p.first_name} ${p.last_name}`.trim(),
           email: p.email,
           score: p.riskScore ?? 0,
           level: p.riskLevel ?? 'low',
-          factors: [],
+          factors: p.latest_risk?.contributing_factors ?? [],
+          recorded_at: p.latest_risk?.recorded_at ?? null,
+          prev_score: p.prev_risk?.overall_risk ?? null,
+          prev_level: p.prev_risk?.risk_level ?? null,
+          prev_recorded_at: p.prev_risk?.recorded_at ?? null,
+          assessment_count: p.assessment_count ?? 0,
         }))
         .sort((a: any, b: any) => b.score - a.score),
+      activity,
     };
+  }
+
+  /**
+   * Agent trace rows across every patient, newest first.
+   *
+   * `getAgentActivity` is deliberately scoped to the signed-in user's own
+   * record; a clinician needs the panel-wide view, so this is a separate
+   * call rather than a flag on that one.
+   */
+  async getClinicianAgentActivity(limit = 40) {
+    const { data } = await client.models.AgentActivity.list({});
+    const rows = [...(data ?? [])].sort((a, b) =>
+      String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+    );
+
+    // One profile lookup per patient, not per row: a single assessment
+    // writes four rows and they all share a patient.
+    const names = new Map<string, string>();
+    const nameFor = async (patientId: string) => {
+      const cached = names.get(patientId);
+      if (cached !== undefined) return cached;
+      let name = '';
+      try {
+        const { data: profile } = await client.models.Profile.get({ id: patientId });
+        if (profile) name = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim();
+      } catch {
+        /* a deleted profile should not drop the trace row */
+      }
+      names.set(patientId, name);
+      return name;
+    };
+
+    const out = [];
+    for (const a of rows.slice(0, limit)) {
+      const name = await nameFor(a.patientId);
+      out.push({
+        id: a.id,
+        patient_id: a.patientId,
+        patient_name: name,
+        agent_type: a.agentType,
+        status: a.status ?? '',
+        // The UI reads `action`; the model stores status + message. Keep both
+        // so neither the patient nor the clinician view renders "undefined".
+        action: a.message ?? a.status ?? '',
+        message: a.message ?? '',
+        details: {},
+        created_at: a.createdAt,
+      });
+    }
+    return out;
   }
 
   /**
